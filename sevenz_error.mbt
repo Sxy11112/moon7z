@@ -18,4 +18,6 @@ pub suberror SevenZError {
   Malformed(reason~ : String)
   /// 结构合法但当前实现尚未支持。
   Unsupported(what~ : String)
+  /// 压缩码流损坏（range decoder 越界、距离越界、分块头非法等）。
+  LzmaCorrupt(reason~ : String)
 }

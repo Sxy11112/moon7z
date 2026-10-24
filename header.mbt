@@ -107,7 +107,7 @@ pub fn SevenZ::streams(self : SevenZ) -> Streams raise SevenZError {
 /// 解析头数据库，一次得到条目表、流信息与条目到子流的映射。
 fn SevenZ::parse_plan(self : SevenZ) -> Plan raise SevenZError {
   let sh = self.start_header
-  let header = copy_range(
+  let mut header = copy_range(
     self.data,
     sh.absolute_offset().to_int(),
     sh.absolute_end().to_int(),
@@ -116,7 +116,7 @@ fn SevenZ::parse_plan(self : SevenZ) -> Plan raise SevenZError {
     raise Malformed(reason="头数据库为空")
   }
   if header.unsafe_get(0) == 0x17 {
-    raise Unsupported(what="编码头（kEncodedHeader）")
+    header = self.decode_encoded_header(header)
   }
   let r = ByteReader::new(header)
   let first = r.read_byte()
@@ -151,6 +151,46 @@ fn SevenZ::parse_plan(self : SevenZ) -> Plan raise SevenZError {
     }
     None => raise Malformed(reason="缺少 kFilesInfo(0x05)")
   }
+}
+
+///|
+/// 解码被压缩的头数据库（kEncodedHeader 0x17）。
+///
+/// 编码头自己带一段 StreamsInfo，用它的 PackInfo / Folder 指向文件里的 packed
+/// 头流；解出来就是明文头（kHeader 0x01）。默认档 7z（bsdtar 默认压缩）的头
+/// 就是这种形态，所以这一步是"普通 7z 可列可解"的必要条件。
+fn SevenZ::decode_encoded_header(
+  self : SevenZ,
+  encoded : Bytes,
+) -> Bytes raise SevenZError {
+  let r = ByteReader::new(encoded)
+  let id = r.read_byte()
+  if id != 0x17 {
+    raise Malformed(reason="不是 kEncodedHeader：" + hex_byte(id))
+  }
+  let streams = parse_streams(r)
+  if streams.folders.length() != 1 || streams.pack_sizes.length() != 1 {
+    raise Unsupported(what="编码头包含多个 Folder / pack stream")
+  }
+  let start = 32L + streams.pack_pos
+  let end = start + streams.pack_sizes[0]
+  if end > self.data.length().to_int64() {
+    raise Malformed(reason="编码头的 packed 区间越界")
+  }
+  let packed = copy_range(self.data, start.to_int(), end.to_int())
+  let plain = decode_folder_bytes(streams.folders[0], packed)
+  if streams.folder_crcs.length() > 0 {
+    match streams.folder_crcs[0] {
+      Some(expected) => {
+        let actual = crc32(plain, 0, plain.length())
+        if actual != expected {
+          raise BadCrc(what="encoded header", expected~, actual~)
+        }
+      }
+      None => ()
+    }
+  }
+  plain
 }
 
 ///|

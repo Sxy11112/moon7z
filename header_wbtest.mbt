@@ -118,15 +118,72 @@ test "kEmptyStream 是裸位域：只有第 3 个条目无数据流" {
 }
 
 ///|
-test "负例：编码头（0x17）尚未支持" {
+test "编码头（默认档）：解出被压缩的头，条目表与 copy 档一致" {
+  // two_text.7z 的下一头是 kEncodedHeader(0x17)：其中的 StreamsInfo 指向
+  // 文件偏移 66..184 的 packed 头流（LZMA1，props=5d00008000，解压 148 字节）。
+  let z = SevenZ::open(fixture_two_text)
+  let entries = z.entries()
+  @test.assert_eq(entries.length(), 2)
+  @test.assert_eq(entries[0].name, "a.txt")
+  @test.assert_eq(entries[0].size, 200L)
+  @test.assert_eq(entries[0].crc, Some(0x28BB3D98L))
+  @test.assert_eq(entries[1].name, "b.txt")
+  @test.assert_eq(entries[1].size, 750L)
+  @test.assert_eq(entries[1].crc, Some(0x4E7B5C05L))
+  // 数据流同样是 LZMA1（coder 0x030101）
+  let s = z.streams()
+  @test.assert_eq(s.folders.length(), 1)
+  @test.assert_eq(s.folders[0].coders.length(), 1)
+  @test.assert_eq(s.folders[0].coders[0].id, 0x030101L)
+}
+
+///|
+test "负例：编码头 packed 数据损坏 → 结构化错误" {
+  // 翻转 packed 头流靠前的一个字节（绝对偏移 72，位于 66..184 之间、
+  // 紧跟 5 字节 range coder 初始化之后）。它不在 StartHeaderCRC /
+  // NextHeaderCRC 的覆盖范围内，所以必须由"解码头"这条路径抓住。
+  //
+  // 两种结局都合法：码流本身被破坏（LzmaCorrupt），或解出来但 CRC 不符
+  // （BadCrc("encoded header")）。用靠后的字节可能落在"未被消费的 flush
+  // 尾部"里而毫无影响，所以这里刻意选靠前的位置。
+  let bad = patch_le(fixture_two_text, 72, 1, 0xFFL)
   try {
-    let _ = SevenZ::open(fixture_two_text).entries()
-    abort("应当 Unsupported")
+    let _ = SevenZ::open(bad).entries()
+    abort("应当报结构化错误")
   } catch {
-    SevenZError::Unsupported(what~) =>
-      @test.assert_eq(what, "编码头（kEncodedHeader）")
+    SevenZError::BadCrc(what~, ..) => @test.assert_eq(what, "encoded header")
+    SevenZError::LzmaCorrupt(..) => ()
     _ => abort("错误类型不对")
   }
+}
+
+///|
+test "负例：编码头声明的 CRC 与实际不符 → BadCrc(encoded header)" {
+  // EncodedHeader 的布局（fixture 实测）：
+  //   184=0x17 kEncodedHeader，185..190 PackInfo，191.. kUnpackInfo，
+  //   209=0x0a kCRC，210=0x01 allDefined，211..214 = 解出头的 CRC-32。
+  // 改掉这 4 字节并重签下一头/起始头 CRC，判据就只可能落在
+  // "解出头的 CRC 与声明不符"这条规则上。
+  let bad = resign(patch_le(fixture_two_text, 211, 4, 0x12345678L), 184, 217)
+  try {
+    let _ = SevenZ::open(bad).entries()
+    abort("应当 BadCrc(encoded header)")
+  } catch {
+    SevenZError::BadCrc(what~, ..) => @test.assert_eq(what, "encoded header")
+    _ => abort("错误类型不对")
+  }
+}
+
+///|
+test "编码头尾部未被消费的字节不影响结果" {
+  // 与上一条互补：LZMA1 裸流的尾部可能有编码器 flush 但解码器用不到的字节
+  // （内核向量里实测 29/34 被消费）。改动这类字节必须仍然解出正确条目表，
+  // 否则说明我们把"合法归档"误判成损坏。
+  let tail = patch_le(fixture_two_text, 183, 1, 0x00L)
+  let entries = SevenZ::open(tail).entries()
+  @test.assert_eq(entries.length(), 2)
+  @test.assert_eq(entries[0].name, "a.txt")
+  @test.assert_eq(entries[1].name, "b.txt")
 }
 
 ///|

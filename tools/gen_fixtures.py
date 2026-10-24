@@ -35,6 +35,10 @@ CORPUS = ROOT / "tools" / "corpus"
 # 无法固定的时间字段，故生成结果不逐字节可复现（见文件头说明）。
 FIXED_MTIME = 1_600_000_000
 
+# 用来读写 7z 的 libarchive 前端：Windows 自带 `tar.exe`，Linux 上是 `bsdtar`
+# （apt install libarchive-tools）。可用 --tar 覆盖。
+TAR = "tar.exe" if sys.platform.startswith("win") else "bsdtar"
+
 # 语料定义：名字 -> (压缩选项, {归档内文件名: 内容})
 # 选项 None = bsdtar 默认（LZMA 数据 + 编码头）；
 # copy / lzma1 / lzma2 为 libarchive 7z 写入器的压缩选项。
@@ -67,6 +71,25 @@ FIXTURES: dict[str, tuple[str | None, dict[str, bytes]]] = {
     "tree_copy": (
         "7zip:compression=copy",
         {"top.txt": b"top\n", "dir/inner.txt": b"inner\n"},
+    ),
+    # 空文件：覆盖"有数据流但长度为 0"与 kEmptyFile 的区别
+    "empty_file_copy": (
+        "7zip:compression=copy",
+        {"empty.txt": b"", "data.txt": b"data\n"},
+    ),
+    # 嵌套目录 + 非 ASCII 名字：覆盖 UTF-16 名字解码与多级路径
+    "nested_copy": (
+        "7zip:compression=copy",
+        {
+            "top.txt": b"top\n",
+            "a/b/deep.txt": b"deep\n",
+            "中文名.txt": "中文内容\n".encode("utf-8"),
+        },
+    ),
+    # 20 KB 文件：覆盖较大 packed 数据下的切片与 CRC（不是多分块，分块要 >2MiB，交给 CI 现场生成）
+    "big_copy": (
+        "7zip:compression=copy",
+        {"big.bin": bytes((i * 7 + 13) & 0xFF for i in range(20 * 1024))},
     ),
 }
 
@@ -101,7 +124,7 @@ def build(
     out = CORPUS / f"{name}.7z"
     if out.exists():
         out.unlink()
-    cmd = ["tar.exe"]
+    cmd = [TAR]
     if option is not None:
         cmd += ["--options", option]
     cmd += ["-a", "-cf", str(out)] + (entries if entries else sorted(files.keys()))
@@ -110,7 +133,7 @@ def build(
     os.utime(out, (FIXED_MTIME, FIXED_MTIME))
     # 用 libarchive 自己复核：列目录必须成功
     listing = subprocess.run(
-        ["tar.exe", "-tf", str(out)], capture_output=True, check=True
+        [TAR, "-tf", str(out)], capture_output=True, check=True
     ).stdout.decode("utf-8", "replace")
     for p in sorted(stage.rglob("*"), reverse=True):
         p.unlink() if p.is_file() else p.rmdir()
@@ -199,14 +222,14 @@ def build_minimal_two_copy() -> pathlib.Path:
 
     # --- 用 libarchive 复核 ---
     listing = subprocess.run(
-        ["tar.exe", "-tf", str(out)], capture_output=True, check=True
+        [TAR, "-tf", str(out)], capture_output=True, check=True
     ).stdout.decode("utf-8", "replace")
     stage = CORPUS / "_minimal.stage"
     if stage.exists():
         for p in sorted(stage.rglob("*"), reverse=True):
             p.unlink() if p.is_file() else p.rmdir()
     stage.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["tar.exe", "-xf", str(out), "-C", str(stage)], check=True)
+    subprocess.run([TAR, "-xf", str(out), "-C", str(stage)], check=True)
     got = {p.name: p.read_bytes() for p in stage.iterdir()}
     for p in sorted(stage.rglob("*"), reverse=True):
         p.unlink() if p.is_file() else p.rmdir()
@@ -235,7 +258,16 @@ def main() -> int:
         help="重新生成已存在的语料（默认保留仓库里已提交的字节）",
     )
     ap.add_argument("--only", help="只处理指定语料（配合 --force 用于新增单个语料）")
+    ap.add_argument(
+        "--tar",
+        help="libarchive 前端可执行文件（默认 Windows 用 tar.exe，其它平台用 bsdtar）",
+    )
     args = ap.parse_args()
+
+    global TAR
+    if args.tar:
+        TAR = args.tar
+    print(f"libarchive 前端: {TAR}")
 
     extra: list[pathlib.Path] = []
     if not args.hex_only and (args.only in (None, "minimal_two_copy")):

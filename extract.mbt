@@ -94,14 +94,15 @@ pub fn SevenZ::extract_all(
       raise Malformed(reason="子流大小之和与 Folder 解压大小不符")
     }
   }
-  // 3) 按条目表装配（目录跳过）
+  // 3) 按条目表装配：目录跳过；"空文件"（无数据流但 is_dir=false）产出空 Bytes
   let out : Array[ArchiveFile] = []
   for i in 0..<plan.entries.length() {
+    let entry = plan.entries[i]
     match plan.mapping[i] {
-      None => ()
+      None => if !entry.is_dir { out.push({ name: entry.name, data: b"", }) }
       Some(owner) => {
         let flat = flat_index(streams, owner.0, owner.1)
-        out.push({ name: plan.entries[i].name, data: sub_data[flat], })
+        out.push({ name: entry.name, data: sub_data[flat], })
       }
     }
   }
@@ -129,28 +130,47 @@ fn SevenZ::decode_folder(
   cursor : Int64,
   packed_size : Int64,
 ) -> Bytes raise SevenZError {
-  if folder.coders.length() != 1 {
-    raise Unsupported(
-      what="由多个 coder 串联组成的 Folder（过滤器链）",
-    )
-  }
-  let coder = folder.coders[0]
-  if coder.id != 0L {
-    raise Unsupported(what="coder " + hex_id(coder.id))
-  }
-  if folder.unpack_sizes.length() != 1 {
-    raise Unsupported(what="Folder 有多个输出流")
-  }
   let start = cursor.to_int()
   let end = start + packed_size.to_int()
   if packed_size < 0L || end > self.data.length() {
     raise Malformed(reason="packed 数据区间越界")
   }
-  let out = copy_range(self.data, start, end)
-  if out.length().to_int64() != folder.unpack_sizes[0] {
-    raise Malformed(reason="COPY coder 的打包大小与解压大小不一致")
+  decode_folder_bytes(folder, copy_range(self.data, start, end))
+}
+
+///|
+/// 用 Folder 的 coder 解码 `packed` 数据。
+///
+/// 支持单 coder 的三种形态：COPY(0x0)、LZMA1(0x030101)、LZMA2(0x21)。
+/// 多 coder 串联（例如 BCJ + LZMA2，可执行文件常见）留待后续增量。
+fn decode_folder_bytes(
+  folder : Folder,
+  packed : Bytes,
+) -> Bytes raise SevenZError {
+  if folder.coders.length() != 1 {
+    raise Unsupported(
+      what="由多个 coder 串联组成的 Folder（过滤器链）",
+    )
   }
-  out
+  if folder.unpack_sizes.length() != 1 {
+    raise Unsupported(what="Folder 有多个输出流")
+  }
+  let coder = folder.coders[0]
+  let unpack_size = folder.unpack_sizes[0]
+  if coder.id == 0L {
+    if packed.length().to_int64() != unpack_size {
+      raise Malformed(
+        reason="COPY coder 的打包大小与解压大小不一致",
+      )
+    }
+    packed
+  } else if coder.id == 0x030101L {
+    lzma1_decode(coder.props, packed, unpack_size)
+  } else if coder.id == 0x21L {
+    lzma2_decode(coder.props, packed, unpack_size)
+  } else {
+    raise Unsupported(what="coder " + hex_id(coder.id))
+  }
 }
 
 ///|
