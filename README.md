@@ -144,6 +144,16 @@ moon run --target js cmd/main -- extract tools/corpus/tree_copy.7z /tmp/out
 - 对拍脚本对本实现明确报 `UNSUPPORTED` 的归档记为 SKIP；临时目录**必须放在 moon 模块之外**
   （moon 的包发现会扫描模块内所有目录，残留临时目录会让 `moon run/check` 直接失败）。
 
+## 参考与许可
+
+- **本实现是原创实现，不是移植**：`moon7z` 未复制任何第三方源码。7z 容器语义依据公开的
+  格式说明（[py7zr 的 `.7z format specification`](https://py7zr.readthedocs.io/en/latest/archive_format.html)）
+  与对真实归档的实测确认（见上文"两个实测得到的格式细节"）；LZMA/LZMA2 按公开算法实现
+  （LZMA SDK 属公有领域，xz/liblzma 的算法与格式文档公开），代码为自行编写。
+- **对拍工具只作测试 oracle，不参与运行**：语料由 `bsdtar`（libarchive，BSD-2-Clause）
+  生成，CI 用 `bsdtar` / `7-Zip` 比对结果。项目本体不链接、不依赖、不分发它们。
+- 本项目采用 **Apache-2.0**（见 [LICENSE](LICENSE)）。
+
 ## 许可
 
 Apache-2.0，见 [LICENSE](LICENSE)。
