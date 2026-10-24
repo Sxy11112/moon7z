@@ -178,12 +178,20 @@ def main() -> int:
         return 1
 
     lines = [
-        "# 兼容性对拍报告（脚本生成）",
+        "# 兼容性对拍报告（脚本生成，请勿手改）",
         "",
         f"- 本实现：`{' '.join(runner)}`",
-        f"- 对照实现：`{args.oracle}`",
-        f"- 模式：{'list + 字节级解包' if args.full_extract else 'list + 内容 CRC'}",
+        f"- 对照实现：`{args.oracle}`（bsdtar/tar = libarchive；7z = 7-Zip）",
+        f"- 模式：{'list + 内容 CRC + 解包字节 SHA-256' if args.full_extract else 'list + 内容 CRC'}",
+        f"- 平台：{sys.platform}",
         f"- 语料：{len(archives)} 个归档（`{corpus}`）",
+        "",
+        "复现：",
+        "",
+        "```bash",
+        f"python3 tools/check_compat.py --runner \"{args.runner}\" --oracle {args.oracle} "
+        f"{'--full-extract ' if args.full_extract else ''}--out {args.out} --min-ok {args.min_ok}",
+        "```",
         "",
         "| 归档 | 列目录 | 内容 CRC | 解包字节 | 说明 |",
         "|---|---|---|---|---|",
