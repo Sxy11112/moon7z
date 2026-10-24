@@ -29,6 +29,33 @@ MoonBit 实现，**唯独 7z 没有**——而 7z 是 Windows 上最常见的分
 | `aurora0x27/lzma-mbt`、`lin2077-zeming/moonxz` | `.xz` / `.lzma` 单流格式的编解码 |
 | **moon7z（本项目）** | **7z 归档容器**：属性树、Folder/Coder 图、文件表、Solid 块与解包 |
 
+## 安装与使用
+
+```bash
+moon add Sxy11112/moon7z      # 作为依赖加入你的 MoonBit 项目
+```
+
+最小使用样例（不读文件，直接给字节）：
+
+```moonbit
+fn demo(bytes : Bytes) -> Unit raise {
+  let z = @moon7z.SevenZ::open(bytes)
+  for e in z.entries() {
+    println(e.name + " " + e.size.to_string())   // 目录的 size 为 0，is_dir 为 true
+  }
+  let files = z.extract_all()                    // [ArchiveFile]：name + data
+  println(files.length().to_string() + " 个文件")
+}
+```
+
+## 明确不做（工程边界）
+
+- 只读：不创建、不修改、不追加 7z 归档；
+- 不支持 AES 加密、分卷（multi-volume）、BCJ2；
+- 不支持过滤器链（BCJ / Delta 等前置 coder，可执行文件常见）——遇到时报 `Unsupported`；
+- 不支持 PPMd / BZip2 / Deflate 等其它 coder；
+- 不支持 RAR / ACE 等其他归档格式。
+
 ## 当前可用的 API
 
 ```moonbit

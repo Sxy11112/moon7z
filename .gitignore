@@ -7,6 +7,8 @@ target
 __pycache__/
 *.pyc
 _out/
+# moon 生成的接口文件（与同工作区其它项目一致：不入库，避免工具链升级产生噪声）
+*.mbti
 # 工作区根目录的资料，绝不入库
 _research/
 *-申报书.md
