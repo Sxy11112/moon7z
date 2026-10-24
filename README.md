@@ -56,6 +56,14 @@ fn demo(bytes : Bytes) -> Unit raise {
 - 不支持 PPMd / BZip2 / Deflate 等其它 coder；
 - 不支持 RAR / ACE 等其他归档格式。
 
+## 演示
+
+![moon7z 演示](docs/demo.gif)
+
+（完整 30 秒 MP4：[docs/demo.mp4](docs/demo.mp4)。用 `python tools/make_demo.py` 可重新生成：
+脚本现场执行 `moon test`、`cmd/main list`、`cmd/main extract`、`tar -tvf` 对拍、
+`tools/check_compat.py` 汇总，并把**真实输出**渲染成视频。）
+
 ## 当前可用的 API
 
 ```moonbit
