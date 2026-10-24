@@ -70,12 +70,12 @@ fn prefix(data : Bytes, n : Int32) -> Bytes {
 }
 
 ///|
-/// 真实语料：bsdtar 生成的 two_text.7z（215 字节，LZMA 数据 + 编码头）。
+/// 真实语料：bsdtar 生成的 two_text.7z（217 字节，LZMA 数据 + 编码头）。
 /// 归档里带文件时间戳，重新生成不会逐字节相同，故以仓库中提交的字节为准：
-/// sha256 = 5634fc366ddebe9595550811b4e7d6d91e4cd1a41048043c1f8d13a0189bcabb
+/// sha256 = e5a8b998f997493a1344328ddec16ea9c78e3b594f3a1579e88172da05463e78
 let fixture_two_text : Bytes = bytes_from_hex(
-  "377abcaf271c00030d152f6c96000000" +
-  "0000000021000000000000000f532813" +
+  "377abcaf271c0003c1d7468198000000" +
+  "000000002100000000000000b7652cc1" +
   "0020ef6668329bdc9d8fb4ea602abaad" +
   "793085390eec17941565ec6f4ffffe94" +
   "58000000813307ae0fd02cf4bc9f3f47" +
@@ -83,11 +83,11 @@ let fixture_two_text : Bytes = bytes_from_hex(
   "e55e23363cfb758e00464471f2bd7bdd" +
   "caa63b455325017958871de6f0e6d562" +
   "a0d063fe106144dd6928cf1c02ece13d" +
-  "14bc5c34c1273ace3383464f9210a4f0" +
-  "983814a9ede337a7f12062ef4acb1e30" +
-  "0bfffac2d80017062201097400070b01" +
-  "000123030101055d000080000c80940a" +
-  "019ae6bdab0000",
+  "14bc5c5b9832878715f0aab02bee7e8d" +
+  "d92c024fb626fd1707d3d4d7174c115b" +
+  "bb95ffff5c2080001706220109760007" +
+  "0b01000123030101055d000080000c80" +
+  "940a01f507382e0000",
 )
 
 ///|
@@ -111,22 +111,22 @@ test "crc32 增量与一次性等价" {
 
 ///|
 test "crc32 覆盖真实归档的 StartHeader 区间" {
-  // Python zlib 独立算出：crc32(fixture[12..32)) == 0x6C2F150D
-  @test.assert_eq(crc32(fixture_two_text, 12, 32), 0x6C2F150DL)
+  // Python zlib 独立算出：crc32(fixture[12..32)) == 0x8146D7C1
+  @test.assert_eq(crc32(fixture_two_text, 12, 32), 0x8146D7C1L)
 }
 
 ///|
 test "打开真实归档：起始头字段逐项核对" {
   let z = SevenZ::open(fixture_two_text)
   let sh = z.start_header()
-  @test.assert_eq(z.size(), 215)
+  @test.assert_eq(z.size(), 217)
   @test.assert_eq(sh.major, 0)
   @test.assert_eq(sh.minor, 3) // bsdtar/libarchive 写作 0.3
-  @test.assert_eq(sh.next_header_offset, 150L)
+  @test.assert_eq(sh.next_header_offset, 152L)
   @test.assert_eq(sh.next_header_size, 33L)
-  @test.assert_eq(sh.next_header_crc, 0x1328530FL)
-  @test.assert_eq(sh.absolute_offset(), 182L)
-  @test.assert_eq(sh.absolute_end(), 215L)
+  @test.assert_eq(sh.next_header_crc, 0xC12C65B7L)
+  @test.assert_eq(sh.absolute_offset(), 184L)
+  @test.assert_eq(sh.absolute_end(), 217L)
   // 下一头第一字节确实是 kEncodedHeader(0x17)
   @test.assert_eq(
     fixture_two_text.unsafe_get(sh.absolute_offset().to_int()).to_int(),
@@ -192,7 +192,8 @@ test "负例：StartHeaderCRC 被篡改" {
 ///|
 test "负例：下一头内容被篡改" {
   try {
-    let _ = SevenZ::open(patch_le(fixture_two_text, 182, 1, 0x18L))
+    // 下一头绝对位置 = 32 + 152 = 184（写成常量以便在语料变化时立刻暴露）
+    let _ = SevenZ::open(patch_le(fixture_two_text, 184, 1, 0x18L))
     abort("应当 BadCrc(next header)")
   } catch {
     SevenZError::BadCrc(what~, ..) => @test.assert_eq(what, "next header")

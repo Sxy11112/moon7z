@@ -104,3 +104,17 @@ pub fn ByteReader::skip(self : ByteReader, n : Int32) -> Unit raise SevenZError 
   self.require(n)
   self.pos += n
 }
+
+///|
+/// 复制 `data[start, end)` 成新的 `Bytes`（区间自动裁剪到数据长度内）。
+pub fn copy_range(data : Bytes, start : Int32, end : Int32) -> Bytes {
+  let buf = @buffer.Buffer()
+  let lo = if start > 0 { start } else { 0 }
+  let hi = if end < data.length() { end } else { data.length() }
+  let mut i = lo
+  while i < hi {
+    buf.write_byte(data.unsafe_get(i))
+    i += 1
+  }
+  buf.to_bytes()
+}

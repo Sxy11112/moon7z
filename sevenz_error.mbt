@@ -16,4 +16,6 @@ pub suberror SevenZError {
   BadCrc(what~ : String, expected~ : Int64, actual~ : Int64)
   /// 头部字段自相矛盾或越界。
   Malformed(reason~ : String)
+  /// 结构合法但当前实现尚未支持。
+  Unsupported(what~ : String)
 }

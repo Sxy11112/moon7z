@@ -35,28 +35,57 @@ CORPUS = ROOT / "tools" / "corpus"
 # 无法固定的时间字段，故生成结果不逐字节可复现（见文件头说明）。
 FIXED_MTIME = 1_600_000_000
 
-# 语料名 -> {归档内文件名: 内容}
-FILES: dict[str, bytes] = {
-    "a.txt": b"A" * 200,
-    "b.txt": b"hello 7z world " * 50,
+# 语料定义：名字 -> (压缩选项, {归档内文件名: 内容})
+# 选项 None = bsdtar 默认（LZMA 数据 + 编码头）；
+# copy / lzma1 / lzma2 为 libarchive 7z 写入器的压缩选项。
+# 实测：copy 档的 NextHeader 以 0x01(kHeader) 开头（明文头），
+#       lzma1/lzma2/默认档以 0x17(kEncodedHeader) 开头（头也被压缩）。
+FIXTURES: dict[str, tuple[str | None, dict[str, bytes]]] = {
+    "two_text": (
+        None,
+        {"a.txt": b"A" * 200, "b.txt": b"hello 7z world " * 50},
+    ),
+    "two_text_copy": (
+        "7zip:compression=copy",
+        {"a.txt": b"A" * 200, "b.txt": b"hello 7z world " * 50},
+    ),
+    "two_text_lzma1": (
+        "7zip:compression=lzma1",
+        {"a.txt": b"A" * 200, "b.txt": b"hello 7z world " * 50},
+    ),
+    "two_text_lzma2": (
+        "7zip:compression=lzma2",
+        {"a.txt": b"A" * 200, "b.txt": b"hello 7z world " * 50},
+    ),
+    # 单文件小语料：字节数少，便于把真实归档内嵌进单元测试（_wbtest.mbt）
+    "one_file_copy": (
+        "7zip:compression=copy",
+        {"hello.txt": b"hello moon7z\n"},
+    ),
+    # 含目录的语料：覆盖 kEmptyStream / kEmptyFile 与 is_dir 判定。
+    # 注意：只有把目录名本身作为参数传给 bsdtar，才会写出目录条目。
+    "tree_copy": (
+        "7zip:compression=copy",
+        {"top.txt": b"top\n", "dir/inner.txt": b"inner\n"},
+    ),
 }
 
-# 语料名 -> bsdtar 压缩选项（None = 默认，即 LZMA 压缩的数据 + 编码头）
-# 实测：copy 档的 NextHeader 以 0x01(kHeader) 开头（明文头）；
-#       lzma1/lzma2 档以 0x17(kEncodedHeader) 开头（头也被压缩）。
-FIXTURES: dict[str, str | None] = {
-    "two_text": None,
-    "two_text_copy": "7zip:compression=copy",
-    "two_text_lzma1": "7zip:compression=lzma1",
-    "two_text_lzma2": "7zip:compression=lzma2",
+# 语料 -> 传给 bsdtar 的条目列表（默认按文件名排序；含目录的语料需显式给出）
+ENTRIES: dict[str, list[str]] = {
+    "tree_copy": ["top.txt", "dir"],
 }
 
 
-def build(name: str, option: str | None) -> pathlib.Path:
+def build(
+    name: str,
+    option: str | None,
+    files: dict[str, bytes],
+    entries: list[str] | None = None,
+) -> pathlib.Path:
     """用 bsdtar（libarchive）生成一个 7z 归档。
 
-    归档里会写入文件 mtime，因此把 mtime 固定到一个常量，保证同样的输入
-    每次都产出逐字节相同的归档（测试里内嵌的 hex 才能复现）。
+    归档里会写入文件时间戳，因此把 mtime 固定到一个常量以减少变化；
+    但仍有无法固定的时间字段，故生成结果不逐字节可复现（见文件头说明）。
     """
     CORPUS.mkdir(parents=True, exist_ok=True)
     stage = CORPUS / f"_{name}.stage"
@@ -64,8 +93,9 @@ def build(name: str, option: str | None) -> pathlib.Path:
         for p in sorted(stage.rglob("*"), reverse=True):
             p.unlink() if p.is_file() else p.rmdir()
     stage.mkdir(parents=True, exist_ok=True)
-    for fname, data in FILES.items():
+    for fname, data in files.items():
         path = stage / fname
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
         os.utime(path, (FIXED_MTIME, FIXED_MTIME))
     out = CORPUS / f"{name}.7z"
@@ -74,7 +104,7 @@ def build(name: str, option: str | None) -> pathlib.Path:
     cmd = ["tar.exe"]
     if option is not None:
         cmd += ["--options", option]
-    cmd += ["-a", "-cf", str(out)] + sorted(FILES.keys())
+    cmd += ["-a", "-cf", str(out)] + (entries if entries else sorted(files.keys()))
     subprocess.run(cmd, cwd=stage, check=True)
     # 归档文件本身也固定 mtime，避免无关差异
     os.utime(out, (FIXED_MTIME, FIXED_MTIME))
@@ -98,6 +128,99 @@ def build(name: str, option: str | None) -> pathlib.Path:
     return out
 
 
+def build_minimal_two_copy() -> pathlib.Path:
+    """手工构造一个"规范形态"的两文件 7z（COPY 压缩），并用 libarchive 复核。
+
+    与 bsdtar 写出的归档互补：
+    - 名字块严格按规范（UTF-16LE、无前导杂字节）——覆盖 kName 的偏移 0 路径；
+    - 两个 Folder / 两个子流 + SubStreamsInfo CRC——覆盖多文件映射。
+    生成后立刻用 `tar -tf` / `tar -xf` 验证 libarchive 能读，确保不是"自说自话"。
+    """
+    import zlib
+
+    files = [("a.txt", b"AAA"), ("b.txt", b"BB")]
+
+    def number(value: int) -> bytes:
+        if value < 0x80:
+            return bytes([value])
+        raise ValueError("本构造器只支持 < 128 的 NUMBER")
+
+    # PackedStreams：两个文件的原始字节依次排布
+    packed = b"".join(data for _, data in files)
+
+    # --- Header ---
+    body = bytearray()
+    body += b"\x01"  # kHeader
+    body += b"\x04"  # kMainStreamsInfo
+    # PackInfo
+    body += b"\x06" + number(0) + number(len(files))  # pack_pos, numPackStreams
+    body += b"\x09" + b"".join(number(len(d)) for _, d in files)  # kSize
+    body += b"\x00"  # kEnd (PackInfo)
+    # UnpackInfo
+    body += b"\x07"
+    body += b"\x0b" + number(len(files)) + b"\x00"  # kFolder, numFolders, external=0
+    for _ in files:
+        body += number(1) + b"\x01\x00"  # 1 个 coder：flag=0x01（id 长 1 字节）, id=0x00 COPY
+    body += b"\x0c" + b"".join(number(len(d)) for _, d in files)  # kCodersUnpackSize
+    body += b"\x00"  # kEnd (UnpackInfo)
+    # SubStreamsInfo：每个子流一个 CRC
+    body += b"\x08"
+    body += b"\x0a\x01" + b"".join(
+        zlib.crc32(d).to_bytes(4, "little") for _, d in files
+    )
+    body += b"\x00"  # kEnd (SubStreamsInfo)
+    body += b"\x00"  # kEnd (StreamsInfo)
+    # FilesInfo
+    # 注意：名字块前面补一个 0x00 字节——libarchive 只接受这种形态
+    # （实测：去掉该字节后 `tar -tf` 报 Damaged；解析器两种形态都支持）。
+    names = (
+        b"\x00"
+        + b"".join(name.encode("utf-16-le") + b"\x00\x00" for name, _ in files)
+    )
+    body += b"\x05" + number(len(files))
+    body += b"\x11" + number(len(names)) + names
+    body += b"\x00"  # kEnd (FilesInfo)
+    body += b"\x00"  # kEnd (Header)
+    header = bytes(body)
+
+    # --- Signature header ---
+    start = bytearray()
+    start += b"7z\xbc\xaf\x27\x1c"
+    start += bytes([0, 4])  # 版本 0.4
+    start += b"\x00\x00\x00\x00"  # StartHeaderCRC 占位
+    start += len(packed).to_bytes(8, "little")
+    start += len(header).to_bytes(8, "little")
+    start += zlib.crc32(header).to_bytes(4, "little")
+    start[8:12] = zlib.crc32(bytes(start[12:32])).to_bytes(4, "little")
+
+    CORPUS.mkdir(parents=True, exist_ok=True)
+    out = CORPUS / "minimal_two_copy.7z"
+    out.write_bytes(bytes(start) + packed + header)
+
+    # --- 用 libarchive 复核 ---
+    listing = subprocess.run(
+        ["tar.exe", "-tf", str(out)], capture_output=True, check=True
+    ).stdout.decode("utf-8", "replace")
+    stage = CORPUS / "_minimal.stage"
+    if stage.exists():
+        for p in sorted(stage.rglob("*"), reverse=True):
+            p.unlink() if p.is_file() else p.rmdir()
+    stage.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["tar.exe", "-xf", str(out), "-C", str(stage)], check=True)
+    got = {p.name: p.read_bytes() for p in stage.iterdir()}
+    for p in sorted(stage.rglob("*"), reverse=True):
+        p.unlink() if p.is_file() else p.rmdir()
+    stage.rmdir()
+    expect = dict(files)
+    if got != expect:
+        raise SystemExit(f"libarchive 解出的内容不符：{got!r} != {expect!r}")
+    print(
+        f"[minimal_two_copy] {out.name}: {out.stat().st_size} bytes; "
+        f"listing: {listing.split()}; 内容与预期一致"
+    )
+    return out
+
+
 def hex_const(path: pathlib.Path) -> str:
     data = path.read_bytes()
     return "".join(f"\\x{b:02X}" for b in data)
@@ -106,12 +229,30 @@ def hex_const(path: pathlib.Path) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--hex-only", action="store_true")
+    ap.add_argument(
+        "--force",
+        action="store_true",
+        help="重新生成已存在的语料（默认保留仓库里已提交的字节）",
+    )
+    ap.add_argument("--only", help="只处理指定语料（配合 --force 用于新增单个语料）")
     args = ap.parse_args()
 
-    for name, option in FIXTURES.items():
+    extra: list[pathlib.Path] = []
+    if not args.hex_only and (args.only in (None, "minimal_two_copy")):
+        minimal = CORPUS / "minimal_two_copy.7z"
+        if args.force or not minimal.exists():
+            extra.append(build_minimal_two_copy())
+        else:
+            print(f"[minimal_two_copy] 保留已提交的 {minimal.name}")
+
+    for name, (option, files) in FIXTURES.items():
+        if args.only is not None and args.only != name:
+            continue
         out = CORPUS / f"{name}.7z"
-        if not args.hex_only:
-            out = build(name, option)
+        if not args.hex_only and (args.force or not out.exists()):
+            out = build(name, option, files, ENTRIES.get(name))
+        elif not args.hex_only:
+            print(f"[{name}] 保留已提交的 {out.name}")
         if not out.exists():
             print(f"missing {out}; run without --hex-only first")
             return 1
@@ -120,10 +261,20 @@ def main() -> int:
             f"--- {name}.7z  size={len(data)}  "
             f"sha256={hashlib.sha256(data).hexdigest()}"
         )
-        # 每行 16 字节，便于粘贴到 _wbtest.mbt
-        for off in range(0, len(data), 16):
-            chunk = data[off : off + 16]
-            print(f"  {off:04X}  " + "".join(f"\\x{b:02X}" for b in chunk))
+        if args.hex_only:
+            # 每行 32 个 hex 字符（16 字节），便于粘贴到 _wbtest.mbt 的字符串拼接
+            h = data.hex()
+            for off in range(0, len(h), 32):
+                print('  "' + h[off : off + 32] + '" +')
+    for out in extra:
+        data = out.read_bytes()
+        print(
+            f"--- {out.name}  size={len(data)}  "
+            f"sha256={hashlib.sha256(data).hexdigest()}"
+        )
+        h = data.hex()
+        for off in range(0, len(h), 32):
+            print('  "' + h[off : off + 32] + '" +')
     return 0
 
 

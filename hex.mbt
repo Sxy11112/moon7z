@@ -18,3 +18,12 @@ pub fn hex_string(bytes : Bytes) -> String {
   }
   out
 }
+
+///|
+/// 一个字节的十六进制渲染（错误消息里标识属性 ID / 首字节）。
+pub fn hex_byte(value : Int32) -> String {
+  let digits : Array[String] = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",
+  ]
+  "0x" + digits[(value >> 4) & 0xF] + digits[value & 0xF]
+}
