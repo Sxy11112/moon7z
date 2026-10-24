@@ -1,0 +1,66 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "Sxy11112/moon7z"
+
+// Values
+pub fn crc32(Bytes, Int, Int) -> Int64
+
+pub fn hex_string(Bytes) -> String
+
+pub let sevenz_signature : Bytes
+
+pub let sevenz_start_header_size : Int
+
+// Errors
+pub suberror SevenZError {
+  Truncated(offset~ : Int64, need~ : Int64, actual~ : Int64)
+  BadSignature(found~ : String)
+  UnsupportedVersion(major~ : Int, minor~ : Int)
+  BadCrc(what~ : String, expected~ : Int64, actual~ : Int64)
+  Malformed(reason~ : String)
+}
+
+// Types and methods
+pub struct ByteReader {
+  data : Bytes
+  mut pos : Int
+}
+pub fn ByteReader::new(Bytes) -> Self
+pub fn ByteReader::position(Self) -> Int
+pub fn ByteReader::read_byte(Self) -> Int raise SevenZError
+pub fn ByteReader::read_bytes(Self, Int) -> Bytes raise SevenZError
+pub fn ByteReader::read_u32(Self) -> Int64 raise SevenZError
+pub fn ByteReader::read_u64(Self) -> Int64 raise SevenZError
+pub fn ByteReader::remaining(Self) -> Int
+pub fn ByteReader::require(Self, Int) -> Unit raise SevenZError
+pub fn ByteReader::skip(Self, Int) -> Unit raise SevenZError
+
+pub struct Crc32 {
+  table : FixedArray[Int64]
+  mut value : Int64
+}
+pub fn Crc32::finalize(Self) -> Int64
+pub fn Crc32::new() -> Self
+pub fn Crc32::update(Self, Bytes, Int, Int) -> Unit
+
+pub struct SevenZ {
+  start_header : StartHeader
+  data : Bytes
+}
+pub fn SevenZ::bytes(Self) -> Bytes
+pub fn SevenZ::open(Bytes) -> Self raise SevenZError
+pub fn SevenZ::size(Self) -> Int
+pub fn SevenZ::start_header(Self) -> StartHeader
+
+pub struct StartHeader {
+  major : Int
+  minor : Int
+  next_header_offset : Int64
+  next_header_size : Int64
+  next_header_crc : Int64
+}
+pub fn StartHeader::absolute_end(Self) -> Int64
+pub fn StartHeader::absolute_offset(Self) -> Int64
+
+// Type aliases
+
+// Traits

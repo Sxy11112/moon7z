@@ -1,0 +1,12 @@
+.DS_Store
+_build/
+target/
+target
+.mooncakes/
+.moonagent/
+__pycache__/
+*.pyc
+_out/
+# 工作区根目录的资料，绝不入库
+_research/
+*-申报书.md
