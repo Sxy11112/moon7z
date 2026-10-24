@@ -3,9 +3,9 @@
 纯 MoonBit 实现的 **7z 归档只读解包库**（`.7z` / 7-Zip 容器），目标后端 `wasm-gc`，
 **零第三方依赖**（只用 MoonBit 标准库）。
 
-> 状态：`0.1.0` 开发中。已实现 F1（起始头 + CRC-32 校验）与 F2（明文头解析 → 条目表），
-> 可读取**明文头归档**（libarchive `7zip:compression=copy` 档）的文件名、大小、CRC 与目录结构；
-> 编码头（默认压缩档）与内容解包在后续增量中补齐。
+> 状态：`0.1.0` 开发中。已实现 F1（起始头 + CRC-32 校验）、F2（明文头解析 → 条目表）、
+> F3（COPY 流端到端解包 + 逐级 CRC 校验）：**可以读取并解出 copy 压缩的 7z**（libarchive
+> `7zip:compression=copy` 档）。编码头（默认压缩档）与 LZMA/LZMA2 解码在后续增量中补齐。
 
 ## 为什么做这个
 
@@ -32,6 +32,10 @@ println(sh.absolute_offset())         // 头数据库在文件中的绝对起点
 // F2：条目表与流信息（明文头）
 let entries = z.entries()             // [Entry]：name / size / crc / is_dir
 let streams = z.streams()             // 打包位置与大小、Folder/coder 链、子流大小与 CRC
+
+// F3：解包（当前支持 COPY coder）
+let files = z.extract_all()           // [ArchiveFile]：目录跳过，空文件为空 Bytes
+let one = z.extract("a.txt")          // 按名字取单个文件
 ```
 
 所有输入都当作外部不可信数据：截断、签名不符、版本不支持、CRC 不符、偏移越界、
@@ -49,7 +53,8 @@ libarchive 形态会解出乱码名字），而是**整个块必须被精确消�
 
 - 真实语料由 `bsdtar`（Windows 自带 `tar.exe` / libarchive）生成：
   `python tools/gen_fixtures.py`（默认保留已提交的语料，`--force` 才重生成，`--only <名字>` 只处理一个）；
-- 期望值来自**独立来源**：`tar -tvf` 的列目录结果 + Python `zlib.crc32` 算出的内容 CRC；
+- 期望值来自**独立来源**：`tar -tvf` 的列目录结果、`tar -xf` 解出的文件字节
+  （生成脚本会在生成时用 libarchive 解包并与写入内容逐字节比对）、Python `zlib.crc32` 算出的内容 CRC；
 - CRC-32 用标准检查值（zlib）做已知答案比对；
 - 每个判据都做变异测试（改坏实现必须变红，并记录能抓到什么）。
 

@@ -68,6 +68,15 @@ priv struct FileTable {
 }
 
 ///|
+/// 头数据库的解析结果：条目表 + 流信息 + "条目 → 子流"的映射。
+priv struct Plan {
+  entries : Array[Entry]
+  streams : Streams
+  /// 与 `entries` 等长；有数据流的条目给出 `(folder 下标, 子流下标)`，目录为 `None`。
+  mapping : Array[(Int32, Int32)?]
+}
+
+///|
 /// 空的流信息（归档没有 kMainStreamsInfo 时使用）。
 fn empty_streams() -> Streams {
   { pack_pos: 0L, pack_sizes: [], pack_crcs: [], folder_crcs: [], folders: [], }
@@ -80,8 +89,8 @@ fn empty_streams() -> Streams {
 /// 输出：条目数组，顺序与归档内文件表一致。
 /// 失败：编码头（F5 尚未实现）/ 属性树非法 / 截断 / 名字数与文件数不符。
 pub fn SevenZ::entries(self : SevenZ) -> Array[Entry] raise SevenZError {
-  let (entries, _) = self.parse_header_db()
-  entries
+  let plan = self.parse_plan()
+  plan.entries
 }
 
 ///|
@@ -90,15 +99,13 @@ pub fn SevenZ::entries(self : SevenZ) -> Array[Entry] raise SevenZError {
 /// 输入：`SevenZ`（起始头已校验）。
 /// 输出：`Streams`，供解压（后续增量）与压缩方式检查使用。
 pub fn SevenZ::streams(self : SevenZ) -> Streams raise SevenZError {
-  let (_, streams) = self.parse_header_db()
-  streams
+  let plan = self.parse_plan()
+  plan.streams
 }
 
 ///|
-/// 解析头数据库，一次得到条目表与流信息。
-fn SevenZ::parse_header_db(
-  self : SevenZ,
-) -> (Array[Entry], Streams) raise SevenZError {
+/// 解析头数据库，一次得到条目表、流信息与条目到子流的映射。
+fn SevenZ::parse_plan(self : SevenZ) -> Plan raise SevenZError {
   let sh = self.start_header
   let header = copy_range(
     self.data,
@@ -138,7 +145,10 @@ fn SevenZ::parse_header_db(
     }
   }
   match table {
-    Some(t) => (build_entries(t, streams), streams)
+    Some(t) => {
+      let (entries, mapping) = build_plan(t, streams)
+      { entries, streams, mapping, }
+    }
     None => raise Malformed(reason="缺少 kFilesInfo(0x05)")
   }
 }
@@ -548,20 +558,24 @@ fn split_names(content : Bytes, start : Int32) -> (Array[String], Int32) {
 }
 
 ///|
-/// 把文件表与流信息合并成条目列表。
-fn build_entries(
+/// 把文件表与流信息合并成条目列表，同时给出"条目 → 子流"的映射。
+fn build_plan(
   table : FileTable,
   streams : Streams,
-) -> Array[Entry] raise SevenZError {
+) -> (Array[Entry], Array[(Int32, Int32)?]) raise SevenZError {
   let sizes : Array[Int64] = []
   let crcs : Array[Int64?] = []
-  for f in streams.folders {
+  let owners : Array[(Int32, Int32)] = []
+  for fi in 0..<streams.folders.length() {
+    let f = streams.folders[fi]
     for j in 0..<f.num_sub_streams {
       sizes.push(if j < f.sub_sizes.length() { f.sub_sizes[j] } else { 0L })
       crcs.push(if j < f.sub_crcs.length() { f.sub_crcs[j] } else { None })
+      owners.push((fi, j))
     }
   }
   let out : Array[Entry] = []
+  let mapping : Array[(Int32, Int32)?] = []
   let mut next = 0
   let mut empty_idx = 0
   for i in 0..<table.names.length() {
@@ -575,6 +589,7 @@ fn build_entries(
         crc: None,
         is_dir: !is_empty_file,
       })
+      mapping.push(None)
     } else {
       if next >= sizes.length() {
         raise Malformed(
@@ -589,10 +604,11 @@ fn build_entries(
         crc: crcs[next],
         is_dir: false,
       })
+      mapping.push(Some(owners[next]))
       next += 1
     }
   }
-  out
+  (out, mapping)
 }
 
 ///|

@@ -8,6 +8,8 @@ pub fn crc32(Bytes, Int, Int) -> Int64
 
 pub fn hex_byte(Int) -> String
 
+pub fn hex_id(Int64) -> String
+
 pub fn hex_string(Bytes) -> String
 
 pub let sevenz_signature : Bytes
@@ -25,6 +27,11 @@ pub suberror SevenZError {
 }
 
 // Types and methods
+pub struct ArchiveFile {
+  name : String
+  data : Bytes
+}
+
 pub struct ByteReader {
   data : Bytes
   mut pos : Int
@@ -79,6 +86,8 @@ pub struct SevenZ {
 }
 pub fn SevenZ::bytes(Self) -> Bytes
 pub fn SevenZ::entries(Self) -> Array[Entry] raise SevenZError
+pub fn SevenZ::extract(Self, String) -> Bytes raise SevenZError
+pub fn SevenZ::extract_all(Self) -> Array[ArchiveFile] raise SevenZError
 pub fn SevenZ::open(Bytes) -> Self raise SevenZError
 pub fn SevenZ::size(Self) -> Int
 pub fn SevenZ::start_header(Self) -> StartHeader

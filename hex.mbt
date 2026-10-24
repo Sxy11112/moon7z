@@ -27,3 +27,21 @@ pub fn hex_byte(value : Int32) -> String {
   ]
   "0x" + digits[(value >> 4) & 0xF] + digits[value & 0xF]
 }
+
+///|
+/// coder 标识的十六进制渲染（如 COPY=0x0、LZMA=0x30101）。
+pub fn hex_id(value : Int64) -> String {
+  if value == 0L {
+    return "0x0"
+  }
+  let digits : Array[String] = [
+    "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f",
+  ]
+  let mut out = ""
+  let mut v = value
+  while v > 0L {
+    out = digits[(v & 0xFL).to_int()] + out
+    v = v >> 4
+  }
+  "0x" + out
+}
