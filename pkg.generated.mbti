@@ -12,6 +12,10 @@ pub fn hex_id(Int64) -> String
 
 pub fn hex_string(Bytes) -> String
 
+pub fn lzma1_decode(Bytes, Bytes, Int64) -> Bytes raise SevenZError
+
+pub fn lzma2_decode(Bytes, Bytes, Int64) -> Bytes raise SevenZError
+
 pub let sevenz_signature : Bytes
 
 pub let sevenz_start_header_size : Int
@@ -24,6 +28,7 @@ pub suberror SevenZError {
   BadCrc(what~ : String, expected~ : Int64, actual~ : Int64)
   Malformed(reason~ : String)
   Unsupported(what~ : String)
+  LzmaCorrupt(reason~ : String)
 }
 
 // Types and methods
