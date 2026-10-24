@@ -4,7 +4,7 @@ version = "0.1.0"
 
 readme = "README.md"
 
-repository = ""
+repository = "https://github.com/Sxy11112/moon7z"
 
 license = "Apache-2.0"
 
