@@ -1,7 +1,8 @@
 # moon7z
 
-纯 MoonBit 实现的 **7z 归档只读解包库**（`.7z` / 7-Zip 容器），目标后端 `wasm-gc`，
-**零第三方依赖**（只用 MoonBit 标准库）。
+纯 MoonBit 实现的 **7z 归档只读解包库**（`.7z` / 7-Zip 容器），目标后端 `wasm-gc`。
+**库本体零第三方依赖**（只用 MoonBit 标准库）；只有可运行的命令行示例 `cmd/main` 用
+`moonbitlang/x` 读文件。
 
 > 状态：`0.1.0` 开发中。已实现起始头校验、明文头解析、**编码头（LZMA/LZMA2 压缩的头）解码**、
 > 条目表与**端到端解包**（COPY / LZMA1 / LZMA2）。
@@ -85,12 +86,28 @@ state 复位 + props；`0xE0-0xFF` 再叠加字典复位；`0x01/0x02` 为未压
 | `big_copy.7z` | copy | 20 KB 文件（较大 packed 数据的切片与 CRC） |
 | `minimal_two_copy.7z` | copy | 手工构造的最小两文件归档（libarchive 复核可读） |
 
+## 命令行示例（可运行）
+
+```bash
+# 列目录：每行 "<名字>\t<大小>\t<CRC32>"（目录的 size/crc 为 "-"）
+moon run --target js cmd/main -- list tools/corpus/two_text.7z
+
+# 解包到目录（自动创建子目录）
+moon run --target js cmd/main -- extract tools/corpus/tree_copy.7z /tmp/out
+```
+
+失败时输出 `UNSUPPORTED\t<原因>` 或 `ERROR\t<原因>`（跨后端行为一致，便于脚本判断）。
+
 ## 工程化
 
 - CI（`.github/workflows/ci.yml`）：`moon fmt --check`、`moon check --deny-warn`、`moon build`、
   `moon test`（wasm-gc + js），随后安装 `libarchive-tools` 与 `p7zip-full`，
-  跑 `python3 tools/check_compat.py` 做**第三方对拍**（列目录 + 解包内容逐文件 SHA-256）。
-- 对拍脚本对本实现明确报 `UNSUPPORTED` 的归档记为 SKIP，便于增量开发期接入 CI。
+  跑 `python3 tools/check_compat.py --full-extract` 做**第三方对拍**：
+  列目录（名字 + 大小）、内容 CRC、以及解包后逐文件 SHA-256。
+- 本地（Windows，只有 `tar.exe`）可跑默认模式：
+  `python tools/check_compat.py --runner "moon run --target js cmd/main --" --oracle tar --min-ok 10`
+- 对拍脚本对本实现明确报 `UNSUPPORTED` 的归档记为 SKIP；临时目录**必须放在 moon 模块之外**
+  （moon 的包发现会扫描模块内所有目录，残留临时目录会让 `moon run/check` 直接失败）。
 
 ## 许可
 

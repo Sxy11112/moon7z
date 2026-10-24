@@ -1,0 +1,10 @@
+// cmd/main/moon.pkg（草稿：随 main.mbt 一起移入仓库）
+import {
+  "Sxy11112/moon7z",
+  "moonbitlang/core/buffer",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/env",
+  "moonbitlang/x/fs",
+}
+
+pkgtype(kind: "executable")
